@@ -22,86 +22,100 @@ from reportlab.lib import colors
 from markdown2 import markdown
 from bs4 import BeautifulSoup
 
-# --------------------------------------------------------------------
-# Updated Context & Prompts for Enneagram with Spelled-Out Type Names
-# --------------------------------------------------------------------
-#
-# We respect the guidance:
-#   - Always spell out type numbers (Type One, Type Two, etc.).
-#   - Use headings correctly, just as we did in the DISC updates.
-#   - Generate a team report with the same four sections.
-#   - Round percentages, no referencing other frameworks (MBTI, TypeFinder).
-#
+# ---------------------------------------------------------------------
+# Mapping numeric strings to spelled-out Enneagram types
+# ---------------------------------------------------------------------
+type_map = {
+    "1": "Type One",
+    "2": "Type Two",
+    "3": "Type Three",
+    "4": "Type Four",
+    "5": "Type Five",
+    "6": "Type Six",
+    "7": "Type Seven",
+    "8": "Type Eight",
+    "9": "Type Nine",
+}
+
+enneagram_types = list(type_map.keys())
+
+def randomize_types_callback():
+    randomized_types = [random.choice(enneagram_types) for _ in range(int(st.session_state['team_size']))]
+    for i in range(int(st.session_state['team_size'])):
+        key = f'enn_{i}'
+        st.session_state[key] = randomized_types[i]
+
+# ---------------------------------------------------------------------
+# Updated Prompts
+# ---------------------------------------------------------------------
+# We combine "Introduction" and "Team Dynamics" into one prompt, just
+# like you did for DISC (Team Profile + Type Distribution).
+# Then we have "Team Insights," then "Next Steps."
 
 initial_context = """
-You are an expert organizational psychologist specializing in team dynamics and personality assessments using the Enneagram framework.
+You are an expert organizational psychologist specializing in team dynamics using the Enneagram framework.
 
+We have nine Enneagram types, referred to as Type One through Type Nine.
 In your writing:
-- Always **spell out** the Enneagram type numbers (e.g., Type One, Type Two, Type Nine).
-- Do **not** write "Type 1" or "Type 2"; instead, write "Type One," "Type Two," etc.
-- Offer specific but concise explanations about how these types shape team dynamics.
+- Always spell out the type number (Type One, Type Two, etc.).
+- Avoid references to other frameworks (MBTI, DISC, TypeFinder).
+- Round all percentages to the nearest whole number.
 
-**Team Size:** {TEAM_SIZE}
+Below are the team details:
+Team Size: {TEAM_SIZE}
 
-**Team Members and their Enneagram Types (numeric form):**
-
+Team Members and their Enneagram Types:
 {TEAM_MEMBERS_LIST}
 
-You will create a comprehensive team personality report based on the Enneagram types present in this team. There are nine Enneagram types total, typically referred to as Type One through Type Nine.
+Your goal is to create a team personality report that includes:
 
-The report consists of four sections:
+1. Introduction & Team Dynamics (combined)
+   - Briefly introduce the Enneagram (Type One ... Type Nine).
+   - Provide a breakdown (table or list) of each type (Type One ... Type Nine), with count & percentage.
+   - Under a subheading "Types on the Team," list each present type with a short description (1–2 bullet points) plus count & %.
+   - Under a subheading "Types Not on the Team," do the same for absent types (count=0).
+   - Include subheadings "Dominant Types" (most common) and "Less Represented Types" (absent/scarce). Explain how each affects communication, decision-making, or team perspective.
+   - End with a short "Summary" subheading (2–3 sentences).
 
-1. **Team Profile**
-2. **Type Distribution**
-3. **Team Insights**
-4. **Actions and Next Steps**
+2. Team Insights
+   - Strengths (at least four, each in bold, followed by a paragraph)
+   - Potential Blind Spots (similarly bolded)
+   - Communication
+   - Teamwork
+   - Conflict
 
-**Formatting Requirements:**
+3. Next Steps
+   - Provide actionable recommendations or next steps for team leaders in bullet form.
 
-- Use clear headings and subheadings in Markdown format (##, ###, etc.).
-- Use bullet points and tables where appropriate.
-- Round all percentages to the nearest whole number.
-- Do not mention any other frameworks (MBTI, TypeFinder, DISC, etc.).
-- The total team size and type distribution are given; use them directly.
-- Maintain a professional, neutral tone.
+Use a clear heading hierarchy in Markdown:
+- `##` for each main section (1,2,3).
+- `###` for subheadings (e.g., "Types on the Team," "Dominant Types," etc.).
+- Blank lines between paragraphs, bullet points, and headings.
+
+Maintain a professional, neutral tone.
 """
 
 prompts = {
-    "Team Profile": """
+    "Intro_Dynamics": """
 {INITIAL_CONTEXT}
 
 **Your Role:**
 
-Write the **Team Profile** section of the report (Section 1).
+Write **Section 1: Introduction & Team Dynamics**.
 
-## Section 1: Team Profile
+## Section 1: Introduction & Team Dynamics
 
-- Briefly introduce the concept of the Enneagram as a framework describing nine distinct personality types (Type One through Type Nine).
-- Summarize **each Enneagram type present** on this team, spelling out the type number (e.g., Type Three, Type Five).
-- Include core motivations, general behavioral tendencies, and how these shape foundational team dynamics.
-- Required length: Approximately 500 words.
+- Briefly introduce the Enneagram system (Type One … Type Nine).
+- Provide a breakdown of each type (1–9) with count and percentage (even if count=0).
+- `### Types on the Team`: List types present with short bullet points, count, and %.
+- `### Types Not on the Team`: List absent types with the same format (count=0, 0%).
+- `### Dominant Types`: Most common types, how they shape communication/decisions.
+- `### Less Represented Types`: Discuss missing or rare types, the impact on the team.
+- `### Summary`: 2–3 sentences wrapping up the distribution insights.
+
+Required length: ~600 words total.
 
 **Begin your section below:**
-""",
-    "Type Distribution": """
-{INITIAL_CONTEXT}
-
-**Report So Far:**
-
-{REPORT_SO_FAR}
-
-**Your Role:**
-
-Write the **Type Distribution** section of the report (Section 2).
-
-## Section 2: Type Distribution
-
-- Present a breakdown (list or table) of how many team members fall into each spelled-out Enneagram type (Type One, Type Two, etc.), along with the percentage of the total team.
-- Discuss what it means to have certain Enneagram types more dominant, and how less represented types add diversity.
-- Include any immediate implications for communication, decision-making, and problem-solving.
-- Required length: Approximately 500 words.
-
-**Continue the report by adding your section below:**
 """,
     "Team Insights": """
 {INITIAL_CONTEXT}
@@ -112,34 +126,32 @@ Write the **Type Distribution** section of the report (Section 2).
 
 **Your Role:**
 
-Write the **Team Insights** section of the report (Section 3).
+Write **Section 2: Team Insights**.
 
-## Section 3: Team Insights
+## Section 2: Team Insights
 
-Create these subheadings (use `###` or `####` as appropriate):
+Use these subheadings (`###` or `####` as needed):
 
 1. **Strengths**  
-   - At least four strengths from the dominant Enneagram types.
-   - Each strength in **bold** on one line, followed by a paragraph explanation.
+   - At least four strengths; each strength in **bold** on one line, followed by a paragraph.
 
 2. **Potential Blind Spots**  
-   - At least four potential challenges or areas of improvement.
-   - Each blind spot in **bold** on one line, followed by a paragraph explanation.
+   - At least four possible challenges; each in **bold** + paragraph.
 
 3. **Communication**  
-   - Summarize how this particular mix of Enneagram types typically communicates.
+   - 1–2 paragraphs describing how these types communicate.
 
 4. **Teamwork**  
-   - Overview of how these types collaborate, delegate, and resolve tasks as a team.
+   - 1–2 paragraphs on collaboration, delegation, synergy.
 
 5. **Conflict**  
-   - Possible sources of conflict based on the Enneagram makeup, plus suggestions for resolution.
+   - 1–2 paragraphs on friction points and resolution ideas.
 
-- Required length: ~700 words total.
+Required length: ~700 words.
 
-**Continue the report by adding your section below:**
+**Continue the report below:**
 """,
-    "Actions and Next Steps": """
+    "NextSteps": """
 {INITIAL_CONTEXT}
 
 **Report So Far:**
@@ -148,39 +160,25 @@ Create these subheadings (use `###` or `####` as appropriate):
 
 **Your Role:**
 
-Write the **Actions and Next Steps** section of the report (Section 4).
+Write **Section 3: Next Steps**.
 
-## Section 4: Actions and Next Steps
+## Section 3: Next Steps
 
-- Provide actionable recommendations for team leaders, leveraging the spelled-out Enneagram types (Type One, Type Two, etc.).
-- Use subheadings (`###`) for each major recommendation area.
-- Offer a brief justification linking each recommendation to the Enneagram types.
-- Present recommendations as bullet points or numbered lists, with blank lines between.
-- End output immediately after the last bullet (no concluding paragraph).
-- Required length: ~400 words.
+- Provide actionable recommendations for team leaders.
+- Use subheadings (`###`) for each recommendation area.
+- Offer bullet points or numbered lists, with blank lines between items.
+- No concluding paragraph: end after the last bullet.
 
-**Conclude the report by adding your section below:**
+Required length: ~400 words.
+
+**Conclude the report below:**
 """
 }
 
-# -------------------------------
-# Enneagram Types (1-9)
-# -------------------------------
-enneagram_types = [str(i) for i in range(1, 10)]
-
-# -------------------------------
-# Callback Function
-# -------------------------------
-def randomize_types_callback():
-    randomized_types = [random.choice(enneagram_types) for _ in range(int(st.session_state['team_size']))]
-    for i in range(int(st.session_state['team_size'])):
-        key = f'enn_{i}'
-        st.session_state[key] = randomized_types[i]
-
-# -------------------------------
-# Streamlit App Layout
-# -------------------------------
-st.title('Enneagram Team Report Generator')
+# ---------------------------------------------------------------------
+# The Streamlit App
+# ---------------------------------------------------------------------
+st.title('Enneagram Team Report Generator (Combined Intro + Dynamics)')
 
 if 'team_size' not in st.session_state:
     st.session_state['team_size'] = 5
@@ -192,7 +190,7 @@ team_size = st.number_input(
 
 st.button('Randomize Types', on_click=randomize_types_callback)
 
-st.subheader('Enter Enneagram types for each team member')
+st.subheader('Select Enneagram types (1-9) for each team member')
 for i in range(int(team_size)):
     if f'enn_{i}' not in st.session_state:
         st.session_state[f'enn_{i}'] = 'Select Enneagram Type'
@@ -205,7 +203,8 @@ for i in range(int(team_size)):
         key=f'enn_{i}'
     )
     if e_type != 'Select Enneagram Type':
-        team_enneagram_types.append(e_type)
+        spelled_out = type_map[e_type]
+        team_enneagram_types.append(spelled_out)
     else:
         team_enneagram_types.append(None)
 
@@ -214,12 +213,10 @@ if st.button('Generate Report'):
         st.error('Please select Enneagram types for all team members.')
     else:
         with st.spinner('Generating report, please wait...'):
-            # Build a string listing team members and their typed Enneagram
-            # We do not rename numeric references here but let the LLM
-            # output spelled-out type names in the text itself.
+            # Build string listing team members
             team_members_list = "\n".join([
-                f"{i+1}. Team Member {i+1}: Enneagram {e_type}"
-                for i, e_type in enumerate(team_enneagram_types)
+                f"{i+1}. Team Member {i+1}: {t}"
+                for i, t in enumerate(team_enneagram_types)
             ])
 
             # Compute counts & percentages
@@ -230,10 +227,9 @@ if st.button('Generate Report'):
                 for t, c in type_counts.items()
             }
 
-            # Generate bar plot for distribution
+            # Create bar chart
             sns.set_style('whitegrid')
             plt.rcParams.update({'font.family': 'serif'})
-
             plt.figure(figsize=(10, 6))
             sns.barplot(
                 x=list(type_counts.keys()),
@@ -245,66 +241,56 @@ if st.button('Generate Report'):
             plt.ylabel('Number of Team Members', fontsize=14)
             plt.xticks(rotation=45)
             plt.tight_layout()
-
             buf = io.BytesIO()
             plt.savefig(buf, format='png')
             buf.seek(0)
             type_distribution_plot = buf.getvalue()
             plt.close()
 
-            # Initialize LLM
+            # Prepare LLM
             chat_model = ChatOpenAI(
                 openai_api_key=st.secrets['API_KEY'],
                 model_name='gpt-4o-2024-08-06',
                 temperature=0.2
             )
 
-            # Prepare initial context
+            # Format initial context
             initial_context_template = PromptTemplate.from_template(initial_context)
             formatted_initial_context = initial_context_template.format(
                 TEAM_SIZE=str(team_size),
                 TEAM_MEMBERS_LIST=team_members_list
             )
 
-            section_order = [
-                "Team Profile",
-                "Type Distribution",
-                "Team Insights",
-                "Actions and Next Steps"
-            ]
-
+            # Generate sections in order
+            section_order = ["Intro_Dynamics", "Team Insights", "NextSteps"]
             report_sections = {}
             report_so_far = ""
 
-            # Generate each section
             for section_name in section_order:
                 prompt_template = PromptTemplate.from_template(prompts[section_name])
-                prompt_variables = {
+                prompt_vars = {
                     "INITIAL_CONTEXT": formatted_initial_context.strip(),
                     "REPORT_SO_FAR": report_so_far.strip()
                 }
-                chat_chain = LLMChain(prompt=prompt_template, llm=chat_model)
-                section_text = chat_chain.run(**prompt_variables)
+                llm_chain = LLMChain(prompt=prompt_template, llm=chat_model)
+                section_text = llm_chain.run(**prompt_vars)
                 report_sections[section_name] = section_text.strip()
                 report_so_far += f"\n\n{section_text.strip()}"
 
-            # Display the final report
-            for section_name in section_order:
-                st.markdown(report_sections[section_name])
-                if section_name == "Type Distribution":
+            # Display on Streamlit
+            for sec in section_order:
+                st.markdown(report_sections[sec])
+                if sec == "Intro_Dynamics":
                     st.header("Enneagram Type Distribution Plot")
                     st.image(type_distribution_plot, use_column_width=True)
 
-            # ------------------------------------------------
-            # PDF Generation (with improved heading styling)
-            # ------------------------------------------------
-            def convert_markdown_to_pdf(report_sections_dict, distribution_plot):
+            # PDF Generation
+            def convert_markdown_to_pdf(report_dict, distribution_plot):
                 pdf_buffer = io.BytesIO()
                 doc = SimpleDocTemplate(pdf_buffer, pagesize=letter)
                 elements = []
                 styles = getSampleStyleSheet()
 
-                # Define separate heading styles
                 styleH1 = ParagraphStyle(
                     'Heading1Custom',
                     parent=styles['Heading1'],
@@ -354,16 +340,14 @@ if st.button('Generate Report'):
                     leftIndent=20,
                 )
 
-                def process_markdown(text):
-                    # Convert Markdown to HTML
-                    html = markdown(text, extras=['tables'])
+                def process_markdown(md_text):
+                    html = markdown(md_text, extras=['tables'])
                     soup = BeautifulSoup(html, 'html.parser')
 
                     for elem in soup.contents:
                         if isinstance(elem, str):
                             continue
 
-                        # Handle tables
                         if elem.name == 'table':
                             table_data = []
                             thead = elem.find('thead')
@@ -423,14 +407,12 @@ if st.button('Generate Report'):
                             elements.append(Paragraph(elem.get_text(strip=True), styleN))
                             elements.append(Spacer(1, 12))
 
-                # Build PDF content from each report section
-                for sec in section_order:
-                    process_markdown(report_sections_dict[sec])
-                    if sec == "Type Distribution":
-                        # Insert distribution plot below type distribution text
+                for s in section_order:
+                    process_markdown(report_dict[s])
+                    if s == "Intro_Dynamics":
                         elements.append(Spacer(1, 12))
-                        img_buffer = io.BytesIO(distribution_plot)
-                        img = ReportLabImage(img_buffer, width=400, height=240)
+                        img_buf = io.BytesIO(distribution_plot)
+                        img = ReportLabImage(img_buf, width=400, height=240)
                         elements.append(img)
                         elements.append(Spacer(1, 12))
 
@@ -438,10 +420,9 @@ if st.button('Generate Report'):
                 pdf_buffer.seek(0)
                 return pdf_buffer
 
-            # Generate PDF
             pdf_data = convert_markdown_to_pdf(report_sections, type_distribution_plot)
             st.download_button(
-                label="Download Report as PDF",
+                "Download Report as PDF",
                 data=pdf_data,
                 file_name="team_enneagram_report.pdf",
                 mime="application/pdf"
