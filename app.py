@@ -181,7 +181,7 @@ st.title('Enneagram Team Report Generator (Combined Intro + Dynamics)')
 
 # -- Cover Page Details
 st.subheader("Cover Page Details")
-logo_path = st.text_input("Logo Path", "logo.png")  # or wherever your logo is
+logo_path = "truity_logo.png"
 company_name = st.text_input("Company Name (for cover page)", "Example Corp")
 team_name = st.text_input("Team Name (for cover page)", "Marketing Team")
 today_str = datetime.date.today().strftime("%B %d, %Y")
