@@ -14,13 +14,16 @@ from reportlab.platypus import (
     Image as ReportLabImage,
     Table,
     TableStyle,
+    HRFlowable,
+    PageBreak
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.pagesizes import letter
-from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.enums import TA_CENTER
 from reportlab.lib import colors
 from markdown2 import markdown
 from bs4 import BeautifulSoup
+import datetime
 
 # ---------------------------------------------------------------------
 # Mapping numeric strings to spelled-out Enneagram types
@@ -48,10 +51,6 @@ def randomize_types_callback():
 # ---------------------------------------------------------------------
 # Updated Prompts
 # ---------------------------------------------------------------------
-# We combine "Introduction" and "Team Dynamics" into one prompt, just
-# like you did for DISC (Team Profile + Type Distribution).
-# Then we have "Team Insights," then "Next Steps."
-
 initial_context = """
 You are an expert organizational psychologist specializing in team dynamics using the Enneagram framework.
 
@@ -180,9 +179,18 @@ Required length: ~400 words.
 # ---------------------------------------------------------------------
 st.title('Enneagram Team Report Generator (Combined Intro + Dynamics)')
 
+# -- Cover Page Details
+st.subheader("Cover Page Details")
+logo_path = st.text_input("Logo Path", "logo.png")  # or wherever your logo is
+company_name = st.text_input("Company Name (for cover page)", "Example Corp")
+team_name = st.text_input("Team Name (for cover page)", "Marketing Team")
+today_str = datetime.date.today().strftime("%B %d, %Y")
+custom_date = st.text_input("Date (for cover page)", today_str)
+
 if 'team_size' not in st.session_state:
     st.session_state['team_size'] = 5
 
+st.subheader("Report Configuration")
 team_size = st.number_input(
     'Enter the number of team members (up to 30)',
     min_value=1, max_value=30, value=5, key='team_size'
@@ -284,13 +292,85 @@ if st.button('Generate Report'):
                     st.header("Enneagram Type Distribution Plot")
                     st.image(type_distribution_plot, use_column_width=True)
 
-            # PDF Generation
-            def convert_markdown_to_pdf(report_dict, distribution_plot):
+            # -----------------------------
+            # Cover Page + PDF Generation
+            # -----------------------------
+            def build_cover_page(logo_path, company_name, team_name, date_str):
+                cover_elems = []
+                styles = getSampleStyleSheet()
+
+                # Title style
+                cover_title_style = ParagraphStyle(
+                    'CoverTitle',
+                    parent=styles['Title'],
+                    fontName='Times-Bold',
+                    fontSize=24,
+                    leading=28,
+                    alignment=TA_CENTER,
+                    spaceAfter=20
+                )
+
+                # Normal center style
+                cover_text_style = ParagraphStyle(
+                    'CoverText',
+                    parent=styles['Normal'],
+                    fontName='Times-Roman',
+                    fontSize=14,
+                    alignment=TA_CENTER,
+                    spaceAfter=8
+                )
+
+                # Top spacer
+                cover_elems.append(Spacer(1, 20))
+
+                # Try to insert the logo (smaller size)
+                try:
+                    logo = ReportLabImage(logo_path, width=140, height=52)  # half size
+                    cover_elems.append(logo)
+                except:
+                    pass
+
+                cover_elems.append(Spacer(1, 40))
+
+                # "Enneagram For The Workplace" + "Team Report"
+                title_para = Paragraph("Enneagram For The Workplace<br/>Team Report", cover_title_style)
+                cover_elems.append(title_para)
+
+                cover_elems.append(Spacer(1, 40))
+
+                # Horizontal line
+                sep = HRFlowable(width="70%", color=colors.darkgoldenrod)
+                cover_elems.append(sep)
+                cover_elems.append(Spacer(1, 20))
+
+                # Company, Team, Date
+                comp_para = Paragraph(company_name, cover_text_style)
+                cover_elems.append(comp_para)
+                tm_para = Paragraph(team_name, cover_text_style)
+                cover_elems.append(tm_para)
+                dt_para = Paragraph(date_str, cover_text_style)
+                cover_elems.append(dt_para)
+
+                cover_elems.append(Spacer(1, 60))
+
+                # Page break so next section starts on new page
+                cover_elems.append(PageBreak())
+                return cover_elems
+
+            def convert_markdown_to_pdf_with_cover(report_dict, distribution_plot, 
+                                                   logo_path, company_name, team_name, date_str):
                 pdf_buffer = io.BytesIO()
                 doc = SimpleDocTemplate(pdf_buffer, pagesize=letter)
                 elements = []
-                styles = getSampleStyleSheet()
 
+                # Build cover page
+                cover_page_elems = build_cover_page(
+                    logo_path, company_name, team_name, date_str
+                )
+                elements.extend(cover_page_elems)
+
+                # Normal styling
+                styles = getSampleStyleSheet()
                 styleH1 = ParagraphStyle(
                     'Heading1Custom',
                     parent=styles['Heading1'],
@@ -340,10 +420,9 @@ if st.button('Generate Report'):
                     leftIndent=20,
                 )
 
-                def process_markdown(md_text):
+                def process_md(md_text):
                     html = markdown(md_text, extras=['tables'])
                     soup = BeautifulSoup(html, 'html.parser')
-
                     for elem in soup.contents:
                         if isinstance(elem, str):
                             continue
@@ -364,9 +443,8 @@ if st.button('Generate Report'):
                                 rows = elem.find_all('tr')
                             for row in rows:
                                 cols = row.find_all(['td', 'th'])
-                                table_row = [col.get_text(strip=True) for col in cols]
+                                table_row = [c.get_text(strip=True) for c in cols]
                                 table_data.append(table_row)
-
                             if table_data:
                                 t = Table(table_data, hAlign='LEFT')
                                 t.setStyle(TableStyle([
@@ -393,22 +471,20 @@ if st.button('Generate Report'):
                         elif elem.name == 'h4':
                             elements.append(Paragraph(elem.text, styleH4))
                             elements.append(Spacer(1, 12))
-
                         elif elem.name == 'p':
                             elements.append(Paragraph(elem.decode_contents(), styleN))
                             elements.append(Spacer(1, 12))
-
                         elif elem.name == 'ul':
                             for li in elem.find_all('li', recursive=False):
                                 elements.append(Paragraph('• ' + li.text, styleList))
                                 elements.append(Spacer(1, 6))
-
                         else:
                             elements.append(Paragraph(elem.get_text(strip=True), styleN))
                             elements.append(Spacer(1, 12))
 
+                # Process each section, add distribution plot after Intro
                 for s in section_order:
-                    process_markdown(report_dict[s])
+                    process_md(report_dict[s])
                     if s == "Intro_Dynamics":
                         elements.append(Spacer(1, 12))
                         img_buf = io.BytesIO(distribution_plot)
@@ -420,7 +496,16 @@ if st.button('Generate Report'):
                 pdf_buffer.seek(0)
                 return pdf_buffer
 
-            pdf_data = convert_markdown_to_pdf(report_sections, type_distribution_plot)
+            # Build PDF with cover
+            pdf_data = convert_markdown_to_pdf_with_cover(
+                report_sections,
+                type_distribution_plot,
+                logo_path,
+                company_name,
+                team_name,
+                custom_date
+            )
+
             st.download_button(
                 "Download Report as PDF",
                 data=pdf_data,
