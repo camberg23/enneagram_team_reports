@@ -2,6 +2,7 @@ import streamlit as st
 from langchain_community.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
+import pandas as pd
 import random
 from collections import Counter
 import matplotlib.pyplot as plt
@@ -26,27 +27,31 @@ from bs4 import BeautifulSoup
 import datetime
 
 # ---------------------------------------------------------------------
-# Mapping numeric strings to spelled-out Enneagram types
+# Enneagram Type Map ("One" => "Type One", etc.)
 # ---------------------------------------------------------------------
-type_map = {
-    "1": "Type One",
-    "2": "Type Two",
-    "3": "Type Three",
-    "4": "Type Four",
-    "5": "Type Five",
-    "6": "Type Six",
-    "7": "Type Seven",
-    "8": "Type Eight",
-    "9": "Type Nine",
+eg_map = {
+    "one": "Type One",
+    "two": "Type Two",
+    "three": "Type Three",
+    "four": "Type Four",
+    "five": "Type Five",
+    "six": "Type Six",
+    "seven": "Type Seven",
+    "eight": "Type Eight",
+    "nine": "Type Nine",
 }
 
-enneagram_types = list(type_map.keys())
-
-def randomize_types_callback():
-    randomized_types = [random.choice(enneagram_types) for _ in range(int(st.session_state['team_size']))]
-    for i in range(int(st.session_state['team_size'])):
-        key = f'enn_{i}'
-        st.session_state[key] = randomized_types[i]
+def parse_eg_type(type_str: str) -> str:
+    """
+    Convert a string like "Nine" or "Two" into "Type Nine"/"Type Two".
+    If invalid, return "" so we skip it.
+    """
+    if not type_str:
+        return ""
+    lower = type_str.strip().lower()
+    if lower in eg_map:
+        return eg_map[lower]
+    return ""
 
 # ---------------------------------------------------------------------
 # Updated Prompts
@@ -177,346 +182,326 @@ Required length: ~400 words.
 # ---------------------------------------------------------------------
 # The Streamlit App
 # ---------------------------------------------------------------------
-st.title('Enneagram Team Report Generator (Combined Intro + Dynamics)')
+st.title('Enneagram Team Report Generator (CSV-based)')
 
 # -- Cover Page Details
 st.subheader("Cover Page Details")
-logo_path = "truity_logo.png"
+logo_path = "truity_logo.png"  # For your cover page
 company_name = st.text_input("Company Name (for cover page)", "Example Corp")
 team_name = st.text_input("Team Name (for cover page)", "Marketing Team")
 today_str = datetime.date.today().strftime("%B %d, %Y")
 custom_date = st.text_input("Date (for cover page)", today_str)
 
-if 'team_size' not in st.session_state:
-    st.session_state['team_size'] = 5
+# CSV upload
+st.subheader("Upload CSV with columns: User Name, EG Type")
+uploaded_csv = st.file_uploader("Upload CSV", type=["csv"])
 
-st.subheader("Report Configuration")
-team_size = st.number_input(
-    'Enter the number of team members (up to 30)',
-    min_value=1, max_value=30, value=5, key='team_size'
-)
-
-st.button('Randomize Types', on_click=randomize_types_callback)
-
-st.subheader('Select Enneagram types (1-9) for each team member')
-for i in range(int(team_size)):
-    if f'enn_{i}' not in st.session_state:
-        st.session_state[f'enn_{i}'] = 'Select Enneagram Type'
-
-team_enneagram_types = []
-for i in range(int(team_size)):
-    e_type = st.selectbox(
-        f'Team Member {i+1}',
-        options=['Select Enneagram Type'] + enneagram_types,
-        key=f'enn_{i}'
-    )
-    if e_type != 'Select Enneagram Type':
-        spelled_out = type_map[e_type]
-        team_enneagram_types.append(spelled_out)
+if st.button("Generate Report from CSV"):
+    if not uploaded_csv:
+        st.error("Please upload a valid CSV file first.")
     else:
-        team_enneagram_types.append(None)
+        with st.spinner("Processing CSV..."):
+            df = pd.read_csv(uploaded_csv)
+            # We only care about 'User Name' and 'EG Type'
+            # We'll skip rows missing or blank 'EG Type'
+            valid_rows = []
+            for i, row in df.iterrows():
+                name_val = row.get("User Name", "")
+                eg_val = row.get("EG Type", "")
+                # Convert them to strings, strip
+                name_str = str(name_val).strip()
+                eg_str = str(eg_val).strip()
+                # parse Enneagram type
+                parsed = parse_eg_type(eg_str)
+                if name_str and parsed:
+                    valid_rows.append((name_str, parsed))
+            
+            if not valid_rows:
+                st.error("No valid Enneagram types found in CSV. Nothing to report.")
+            else:
+                # Team size, members list
+                team_size = len(valid_rows)
+                team_members_list = ""
+                for i, (nm, t) in enumerate(valid_rows):
+                    team_members_list += f"{i+1}. {nm}: {t}\n"
 
-if st.button('Generate Report'):
-    if None in team_enneagram_types:
-        st.error('Please select Enneagram types for all team members.')
-    else:
-        with st.spinner('Generating report, please wait...'):
-            # Build string listing team members
-            team_members_list = "\n".join([
-                f"{i+1}. Team Member {i+1}: {t}"
-                for i, t in enumerate(team_enneagram_types)
-            ])
-
-            # Compute counts & percentages
-            type_counts = Counter(team_enneagram_types)
-            total_members = len(team_enneagram_types)
-            type_percentages = {
-                t: round((c / total_members) * 100)
-                for t, c in type_counts.items()
-            }
-
-            # Create bar chart
-            sns.set_style('whitegrid')
-            plt.rcParams.update({'font.family': 'serif'})
-            plt.figure(figsize=(10, 6))
-            sns.barplot(
-                x=list(type_counts.keys()),
-                y=list(type_counts.values()),
-                palette='viridis'
-            )
-            plt.title('Enneagram Type Distribution', fontsize=16)
-            plt.xlabel('Enneagram Types', fontsize=14)
-            plt.ylabel('Number of Team Members', fontsize=14)
-            plt.xticks(rotation=45)
-            plt.tight_layout()
-            buf = io.BytesIO()
-            plt.savefig(buf, format='png')
-            buf.seek(0)
-            type_distribution_plot = buf.getvalue()
-            plt.close()
-
-            # Prepare LLM
-            chat_model = ChatOpenAI(
-                openai_api_key=st.secrets['API_KEY'],
-                model_name='gpt-4o-2024-08-06',
-                temperature=0.2
-            )
-
-            # Format initial context
-            initial_context_template = PromptTemplate.from_template(initial_context)
-            formatted_initial_context = initial_context_template.format(
-                TEAM_SIZE=str(team_size),
-                TEAM_MEMBERS_LIST=team_members_list
-            )
-
-            # Generate sections in order
-            section_order = ["Intro_Dynamics", "Team Insights", "NextSteps"]
-            report_sections = {}
-            report_so_far = ""
-
-            for section_name in section_order:
-                prompt_template = PromptTemplate.from_template(prompts[section_name])
-                prompt_vars = {
-                    "INITIAL_CONTEXT": formatted_initial_context.strip(),
-                    "REPORT_SO_FAR": report_so_far.strip()
+                # Count distribution
+                from collections import Counter
+                type_counts = Counter([r[1] for r in valid_rows])
+                total_members = len(valid_rows)
+                type_percentages = {
+                    k: round((v / total_members) * 100)
+                    for k, v in type_counts.items()
                 }
-                llm_chain = LLMChain(prompt=prompt_template, llm=chat_model)
-                section_text = llm_chain.run(**prompt_vars)
-                report_sections[section_name] = section_text.strip()
-                report_so_far += f"\n\n{section_text.strip()}"
 
-            # Display on Streamlit
-            for sec in section_order:
-                st.markdown(report_sections[sec])
-                if sec == "Intro_Dynamics":
-                    st.header("Enneagram Type Distribution Plot")
-                    st.image(type_distribution_plot, use_column_width=True)
+                # Create bar chart
+                sns.set_style('whitegrid')
+                plt.rcParams.update({'font.family': 'serif'})
+                plt.figure(figsize=(10, 6))
+                sorted_types = sorted(type_counts.keys())
+                sorted_counts = [type_counts[t] for t in sorted_types]
+                sns.barplot(
+                    x=sorted_types,
+                    y=sorted_counts,
+                    palette='viridis'
+                )
+                plt.title('Enneagram Type Distribution', fontsize=16)
+                plt.xlabel('Enneagram Types', fontsize=14)
+                plt.ylabel('Number of Team Members', fontsize=14)
+                plt.xticks(rotation=45)
+                plt.tight_layout()
+                buf = io.BytesIO()
+                plt.savefig(buf, format='png')
+                buf.seek(0)
+                type_distribution_plot = buf.getvalue()
+                plt.close()
 
-            # -----------------------------
-            # Cover Page + PDF Generation
-            # -----------------------------
-            def build_cover_page(logo_path, company_name, team_name, date_str):
-                from reportlab.platypus import (
-                    Spacer, Paragraph, Image as ReportLabImage, HRFlowable, PageBreak
-                )
-                from reportlab.lib.enums import TA_CENTER
-                from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-                from reportlab.lib import colors
-            
-                cover_elems = []
-                styles = getSampleStyleSheet()
-            
-                # Title style
-                cover_title_style = ParagraphStyle(
-                    'CoverTitle',
-                    parent=styles['Title'],
-                    fontName='Times-Bold',
-                    fontSize=24,
-                    leading=28,
-                    alignment=TA_CENTER,
-                    spaceAfter=20
-                )
-            
-                # Normal center style
-                cover_text_style = ParagraphStyle(
-                    'CoverText',
-                    parent=styles['Normal'],
-                    fontName='Times-Roman',
-                    fontSize=14,
-                    alignment=TA_CENTER,
-                    spaceAfter=8
-                )
-            
-                # Start with some vertical space to push content down
-                cover_elems.append(Spacer(1, 80))
-            
-                # Logo (about half original size)
-                try:
-                    logo = ReportLabImage(logo_path, width=140, height=52)
-                    cover_elems.append(logo)
-                except:
-                    pass
-            
-                cover_elems.append(Spacer(1, 50))
-            
-                # "Enneagram For The Workplace" + "Team Report"
-                title_para = Paragraph("Enneagram For The Workplace<br/>Team Report", cover_title_style)
-                cover_elems.append(title_para)
-            
-                cover_elems.append(Spacer(1, 50))
-            
-                # Horizontal line
-                sep = HRFlowable(width="70%", color=colors.darkgoldenrod)
-                cover_elems.append(sep)
-                cover_elems.append(Spacer(1, 20))
-            
-                # Company, Team, Date
-                comp_para = Paragraph(company_name, cover_text_style)
-                cover_elems.append(comp_para)
-                tm_para = Paragraph(team_name, cover_text_style)
-                cover_elems.append(tm_para)
-                dt_para = Paragraph(date_str, cover_text_style)
-                cover_elems.append(dt_para)
-            
-                cover_elems.append(Spacer(1, 60))
-            
-                # Page break so next section starts on a new page
-                cover_elems.append(PageBreak())
-
-                return cover_elems
-
-            def convert_markdown_to_pdf_with_cover(report_dict, distribution_plot, 
-                                                   logo_path, company_name, team_name, date_str):
-                pdf_buffer = io.BytesIO()
-                doc = SimpleDocTemplate(pdf_buffer, pagesize=letter)
-                elements = []
-
-                # Build cover page
-                cover_page_elems = build_cover_page(
-                    logo_path, company_name, team_name, date_str
-                )
-                elements.extend(cover_page_elems)
-
-                # Normal styling
-                styles = getSampleStyleSheet()
-                styleH1 = ParagraphStyle(
-                    'Heading1Custom',
-                    parent=styles['Heading1'],
-                    fontName='Times-Bold',
-                    fontSize=18,
-                    leading=22,
-                    spaceAfter=10,
-                )
-                styleH2 = ParagraphStyle(
-                    'Heading2Custom',
-                    parent=styles['Heading2'],
-                    fontName='Times-Bold',
-                    fontSize=16,
-                    leading=20,
-                    spaceAfter=8,
-                )
-                styleH3 = ParagraphStyle(
-                    'Heading3Custom',
-                    parent=styles['Heading3'],
-                    fontName='Times-Bold',
-                    fontSize=14,
-                    leading=18,
-                    spaceAfter=6,
-                )
-                styleH4 = ParagraphStyle(
-                    'Heading4Custom',
-                    parent=styles['Heading4'],
-                    fontName='Times-Bold',
-                    fontSize=12,
-                    leading=16,
-                    spaceAfter=4,
+                # Prepare LLM
+                from langchain_community.chat_models import ChatOpenAI
+                chat_model = ChatOpenAI(
+                    openai_api_key=st.secrets['API_KEY'],
+                    model_name='gpt-4o-2024-08-06',
+                    temperature=0.2
                 )
 
-                styleN = ParagraphStyle(
-                    'Normal',
-                    parent=styles['Normal'],
-                    fontName='Times-Roman',
-                    fontSize=12,
-                    leading=14,
-                )
-                styleList = ParagraphStyle(
-                    'List',
-                    parent=styles['Normal'],
-                    fontName='Times-Roman',
-                    fontSize=12,
-                    leading=14,
-                    leftIndent=20,
+                # Format initial context
+                from langchain.prompts import PromptTemplate
+                initial_context_template = PromptTemplate.from_template(initial_context)
+                formatted_initial_context = initial_context_template.format(
+                    TEAM_SIZE=str(team_size),
+                    TEAM_MEMBERS_LIST=team_members_list
                 )
 
-                def process_md(md_text):
-                    html = markdown(md_text, extras=['tables'])
-                    soup = BeautifulSoup(html, 'html.parser')
-                    for elem in soup.contents:
-                        if isinstance(elem, str):
-                            continue
+                # Generate sections
+                section_order = ["Intro_Dynamics", "Team Insights", "NextSteps"]
+                report_sections = {}
+                report_so_far = ""
 
-                        if elem.name == 'table':
-                            table_data = []
-                            thead = elem.find('thead')
-                            if thead:
-                                header_row = []
-                                for th in thead.find_all('th'):
-                                    header_row.append(th.get_text(strip=True))
-                                if header_row:
-                                    table_data.append(header_row)
-                            tbody = elem.find('tbody')
-                            if tbody:
-                                rows = tbody.find_all('tr')
+                from langchain.chains import LLMChain
+                for section_name in section_order:
+                    prompt_template = PromptTemplate.from_template(prompts[section_name])
+                    prompt_vars = {
+                        "INITIAL_CONTEXT": formatted_initial_context.strip(),
+                        "REPORT_SO_FAR": report_so_far.strip()
+                    }
+                    chain = LLMChain(prompt=prompt_template, llm=chat_model)
+                    section_text = chain.run(**prompt_vars)
+                    report_sections[section_name] = section_text.strip()
+                    report_so_far += f"\n\n{section_text.strip()}"
+
+                # Display in Streamlit
+                for s in section_order:
+                    st.markdown(report_sections[s])
+                    if s == "Intro_Dynamics":
+                        st.header("Enneagram Type Distribution Plot")
+                        st.image(type_distribution_plot, use_column_width=True)
+
+                # -----------------------------
+                # Cover Page + PDF Generation
+                # -----------------------------
+                def build_cover_page(logo_path, company_name, team_name, date_str):
+                    cover_elems = []
+                    styles = getSampleStyleSheet()
+
+                    cover_title_style = ParagraphStyle(
+                        'CoverTitle',
+                        parent=styles['Title'],
+                        fontName='Times-Bold',
+                        fontSize=24,
+                        leading=28,
+                        alignment=TA_CENTER,
+                        spaceAfter=20
+                    )
+                    cover_text_style = ParagraphStyle(
+                        'CoverText',
+                        parent=styles['Normal'],
+                        fontName='Times-Roman',
+                        fontSize=14,
+                        alignment=TA_CENTER,
+                        spaceAfter=8
+                    )
+
+                    # Some vertical space
+                    cover_elems.append(Spacer(1, 80))
+
+                    try:
+                        logo = ReportLabImage(logo_path, width=140, height=52)
+                        cover_elems.append(logo)
+                    except:
+                        pass
+
+                    cover_elems.append(Spacer(1, 50))
+
+                    # Title
+                    title_para = Paragraph("Enneagram For The Workplace<br/>Team Report", cover_title_style)
+                    cover_elems.append(title_para)
+
+                    cover_elems.append(Spacer(1, 50))
+
+                    # Horizontal line
+                    sep = HRFlowable(width="70%", color=colors.darkgoldenrod)
+                    cover_elems.append(sep)
+                    cover_elems.append(Spacer(1, 20))
+
+                    # Company, Team, Date
+                    comp_para = Paragraph(company_name, cover_text_style)
+                    cover_elems.append(comp_para)
+                    tm_para = Paragraph(team_name, cover_text_style)
+                    cover_elems.append(tm_para)
+                    dt_para = Paragraph(date_str, cover_text_style)
+                    cover_elems.append(dt_para)
+
+                    cover_elems.append(Spacer(1, 60))
+                    cover_elems.append(PageBreak())
+                    return cover_elems
+
+                def convert_markdown_to_pdf_with_cover(report_dict, distribution_plot,
+                                                       logo_path, company_name, team_name, date_str):
+                    pdf_buffer = io.BytesIO()
+                    doc = SimpleDocTemplate(pdf_buffer, pagesize=letter)
+                    elements = []
+
+                    # Cover page
+                    cover_elems = build_cover_page(logo_path, company_name, team_name, date_str)
+                    elements.extend(cover_elems)
+
+                    # Normal styling
+                    styles = getSampleStyleSheet()
+                    styleH1 = ParagraphStyle(
+                        'Heading1Custom',
+                        parent=styles['Heading1'],
+                        fontName='Times-Bold',
+                        fontSize=18,
+                        leading=22,
+                        spaceAfter=10,
+                    )
+                    styleH2 = ParagraphStyle(
+                        'Heading2Custom',
+                        parent=styles['Heading2'],
+                        fontName='Times-Bold',
+                        fontSize=16,
+                        leading=20,
+                        spaceAfter=8,
+                    )
+                    styleH3 = ParagraphStyle(
+                        'Heading3Custom',
+                        parent=styles['Heading3'],
+                        fontName='Times-Bold',
+                        fontSize=14,
+                        leading=18,
+                        spaceAfter=6,
+                    )
+                    styleH4 = ParagraphStyle(
+                        'Heading4Custom',
+                        parent=styles['Heading4'],
+                        fontName='Times-Bold',
+                        fontSize=12,
+                        leading=16,
+                        spaceAfter=4,
+                    )
+                    styleN = ParagraphStyle(
+                        'Normal',
+                        parent=styles['Normal'],
+                        fontName='Times-Roman',
+                        fontSize=12,
+                        leading=14,
+                    )
+                    styleList = ParagraphStyle(
+                        'List',
+                        parent=styles['Normal'],
+                        fontName='Times-Roman',
+                        fontSize=12,
+                        leading=14,
+                        leftIndent=20,
+                    )
+
+                    def process_md(md_text):
+                        html = markdown(md_text, extras=['tables'])
+                        soup = BeautifulSoup(html, 'html.parser')
+                        for elem in soup.contents:
+                            if isinstance(elem, str):
+                                continue
+
+                            if elem.name == 'h1':
+                                elements.append(Paragraph(elem.text, styleH1))
+                                elements.append(Spacer(1, 12))
+                            elif elem.name == 'h2':
+                                elements.append(Paragraph(elem.text, styleH2))
+                                elements.append(Spacer(1, 12))
+                            elif elem.name == 'h3':
+                                elements.append(Paragraph(elem.text, styleH3))
+                                elements.append(Spacer(1, 12))
+                            elif elem.name == 'h4':
+                                elements.append(Paragraph(elem.text, styleH4))
+                                elements.append(Spacer(1, 12))
+                            elif elem.name == 'p':
+                                elements.append(Paragraph(elem.decode_contents(), styleN))
+                                elements.append(Spacer(1, 12))
+                            elif elem.name == 'ul':
+                                for li in elem.find_all('li', recursive=False):
+                                    elements.append(Paragraph('• ' + li.text, styleList))
+                                    elements.append(Spacer(1, 6))
+                            elif elem.name == 'table':
+                                table_data = []
+                                thead = elem.find('thead')
+                                if thead:
+                                    header_row = []
+                                    for th in thead.find_all('th'):
+                                        header_row.append(th.get_text(strip=True))
+                                    if header_row:
+                                        table_data.append(header_row)
+                                tbody = elem.find('tbody')
+                                if tbody:
+                                    rows = tbody.find_all('tr')
+                                else:
+                                    rows = elem.find_all('tr')
+                                for row in rows:
+                                    cols = row.find_all(['td', 'th'])
+                                    table_row = [c.get_text(strip=True) for c in cols]
+                                    table_data.append(table_row)
+                                if table_data:
+                                    t = Table(table_data, hAlign='LEFT')
+                                    t.setStyle(TableStyle([
+                                        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                                        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                                        ('FONTNAME', (0, 0), (-1, 0), 'Times-Bold'),
+                                        ('FONTNAME', (0, 1), (-1, -1), 'Times-Roman'),
+                                        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                                        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                                    ]))
+                                    elements.append(t)
+                                    elements.append(Spacer(1, 12))
                             else:
-                                rows = elem.find_all('tr')
-                            for row in rows:
-                                cols = row.find_all(['td', 'th'])
-                                table_row = [c.get_text(strip=True) for c in cols]
-                                table_data.append(table_row)
-                            if table_data:
-                                t = Table(table_data, hAlign='LEFT')
-                                t.setStyle(TableStyle([
-                                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-                                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                                    ('FONTNAME', (0, 0), (-1, 0), 'Times-Bold'),
-                                    ('FONTNAME', (0, 1), (-1, -1), 'Times-Roman'),
-                                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
-                                ]))
-                                elements.append(t)
+                                elements.append(Paragraph(elem.get_text(strip=True), styleN))
                                 elements.append(Spacer(1, 12))
 
-                        elif elem.name == 'h1':
-                            elements.append(Paragraph(elem.text, styleH1))
+                    # Process each section
+                    for s in section_order:
+                        process_md(report_dict[s])
+                        if s == "Intro_Dynamics":
                             elements.append(Spacer(1, 12))
-                        elif elem.name == 'h2':
-                            elements.append(Paragraph(elem.text, styleH2))
-                            elements.append(Spacer(1, 12))
-                        elif elem.name == 'h3':
-                            elements.append(Paragraph(elem.text, styleH3))
-                            elements.append(Spacer(1, 12))
-                        elif elem.name == 'h4':
-                            elements.append(Paragraph(elem.text, styleH4))
-                            elements.append(Spacer(1, 12))
-                        elif elem.name == 'p':
-                            elements.append(Paragraph(elem.decode_contents(), styleN))
-                            elements.append(Spacer(1, 12))
-                        elif elem.name == 'ul':
-                            for li in elem.find_all('li', recursive=False):
-                                elements.append(Paragraph('• ' + li.text, styleList))
-                                elements.append(Spacer(1, 6))
-                        else:
-                            elements.append(Paragraph(elem.get_text(strip=True), styleN))
+                            img_buf = io.BytesIO(distribution_plot)
+                            img = ReportLabImage(img_buf, width=400, height=240)
+                            elements.append(img)
                             elements.append(Spacer(1, 12))
 
-                # Process each section, add distribution plot after Intro
-                for s in section_order:
-                    process_md(report_dict[s])
-                    if s == "Intro_Dynamics":
-                        elements.append(Spacer(1, 12))
-                        img_buf = io.BytesIO(distribution_plot)
-                        img = ReportLabImage(img_buf, width=400, height=240)
-                        elements.append(img)
-                        elements.append(Spacer(1, 12))
+                    doc.build(elements)
+                    pdf_buffer.seek(0)
+                    return pdf_buffer
 
-                doc.build(elements)
-                pdf_buffer.seek(0)
-                return pdf_buffer
+                pdf_data = convert_markdown_to_pdf_with_cover(
+                    report_sections,
+                    type_distribution_plot,
+                    logo_path,
+                    company_name,
+                    team_name,
+                    custom_date
+                )
 
-            # Build PDF with cover
-            pdf_data = convert_markdown_to_pdf_with_cover(
-                report_sections,
-                type_distribution_plot,
-                logo_path,
-                company_name,
-                team_name,
-                custom_date
-            )
-
-            st.download_button(
-                "Download Report as PDF",
-                data=pdf_data,
-                file_name="team_enneagram_report.pdf",
-                mime="application/pdf"
-            )
+                st.download_button(
+                    "Download Report as PDF",
+                    data=pdf_data,
+                    file_name="team_enneagram_report.pdf",
+                    mime="application/pdf"
+                )
