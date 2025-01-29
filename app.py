@@ -296,9 +296,16 @@ if st.button('Generate Report'):
             # Cover Page + PDF Generation
             # -----------------------------
             def build_cover_page(logo_path, company_name, team_name, date_str):
+                from reportlab.platypus import (
+                    Spacer, Paragraph, Image as ReportLabImage, HRFlowable, PageBreak
+                )
+                from reportlab.lib.enums import TA_CENTER
+                from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+                from reportlab.lib import colors
+            
                 cover_elems = []
                 styles = getSampleStyleSheet()
-
+            
                 # Title style
                 cover_title_style = ParagraphStyle(
                     'CoverTitle',
@@ -309,7 +316,7 @@ if st.button('Generate Report'):
                     alignment=TA_CENTER,
                     spaceAfter=20
                 )
-
+            
                 # Normal center style
                 cover_text_style = ParagraphStyle(
                     'CoverText',
@@ -319,30 +326,30 @@ if st.button('Generate Report'):
                     alignment=TA_CENTER,
                     spaceAfter=8
                 )
-
-                # Top spacer
-                cover_elems.append(Spacer(1, 20))
-
-                # Try to insert the logo (smaller size)
+            
+                # Start with some vertical space to push content down
+                cover_elems.append(Spacer(1, 80))
+            
+                # Logo (about half original size)
                 try:
-                    logo = ReportLabImage(logo_path, width=140, height=52)  # half size
+                    logo = ReportLabImage(logo_path, width=140, height=52)
                     cover_elems.append(logo)
                 except:
                     pass
-
-                cover_elems.append(Spacer(1, 40))
-
+            
+                cover_elems.append(Spacer(1, 50))
+            
                 # "Enneagram For The Workplace" + "Team Report"
                 title_para = Paragraph("Enneagram For The Workplace<br/>Team Report", cover_title_style)
                 cover_elems.append(title_para)
-
-                cover_elems.append(Spacer(1, 40))
-
+            
+                cover_elems.append(Spacer(1, 50))
+            
                 # Horizontal line
                 sep = HRFlowable(width="70%", color=colors.darkgoldenrod)
                 cover_elems.append(sep)
                 cover_elems.append(Spacer(1, 20))
-
+            
                 # Company, Team, Date
                 comp_para = Paragraph(company_name, cover_text_style)
                 cover_elems.append(comp_para)
@@ -350,12 +357,13 @@ if st.button('Generate Report'):
                 cover_elems.append(tm_para)
                 dt_para = Paragraph(date_str, cover_text_style)
                 cover_elems.append(dt_para)
-
+            
                 cover_elems.append(Spacer(1, 60))
-
-                # Page break so next section starts on new page
+            
+                # Page break so next section starts on a new page
                 cover_elems.append(PageBreak())
-                return cover_elems
+
+    return cover_elems
 
             def convert_markdown_to_pdf_with_cover(report_dict, distribution_plot, 
                                                    logo_path, company_name, team_name, date_str):
