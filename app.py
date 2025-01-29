@@ -363,7 +363,7 @@ if st.button('Generate Report'):
                 # Page break so next section starts on a new page
                 cover_elems.append(PageBreak())
 
-    return cover_elems
+                return cover_elems
 
             def convert_markdown_to_pdf_with_cover(report_dict, distribution_plot, 
                                                    logo_path, company_name, team_name, date_str):
