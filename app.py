@@ -1,7 +1,4 @@
 import streamlit as st
-from langchain_community.chat_models import ChatOpenAI
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
 import pandas as pd
 import random
 from collections import Counter
@@ -26,9 +23,14 @@ from markdown2 import markdown
 from bs4 import BeautifulSoup
 import datetime
 
+from langchain_community.chat_models import ChatOpenAI
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
+
 # ---------------------------------------------------------------------
-# Enneagram Type Map ("One" => "Type One", etc.)
+# Enneagram Type Parsing
 # ---------------------------------------------------------------------
+# We'll parse strings like "Nine" => "Type Nine"
 eg_map = {
     "one": "Type One",
     "two": "Type Two",
@@ -41,20 +43,17 @@ eg_map = {
     "nine": "Type Nine",
 }
 
-def parse_eg_type(type_str: str) -> str:
+def parse_eg_type(raw: str) -> str:
     """
-    Convert a string like "Nine" or "Two" into "Type Nine"/"Type Two".
-    If invalid, return "" so we skip it.
+    Convert text like "Nine" => "Type Nine". Return "" if invalid.
     """
-    if not type_str:
+    if not raw:
         return ""
-    lower = type_str.strip().lower()
-    if lower in eg_map:
-        return eg_map[lower]
-    return ""
+    lower = raw.strip().lower()
+    return eg_map.get(lower, "")
 
 # ---------------------------------------------------------------------
-# Updated Prompts
+# Prompts (Slightly Updated to Mention Names in "Types on the Team")
 # ---------------------------------------------------------------------
 initial_context = """
 You are an expert organizational psychologist specializing in team dynamics using the Enneagram framework.
@@ -76,7 +75,8 @@ Your goal is to create a team personality report that includes:
 1. Introduction & Team Dynamics (combined)
    - Briefly introduce the Enneagram (Type One ... Type Nine).
    - Provide a breakdown (table or list) of each type (Type One ... Type Nine), with count & percentage.
-   - Under a subheading "Types on the Team," list each present type with a short description (1–2 bullet points) plus count & %.
+   - Under a subheading "Types on the Team," list each present type with a short description (1–2 bullet points) plus count & %, 
+     **and mention the actual user names who have each type** (from the provided list).
    - Under a subheading "Types Not on the Team," do the same for absent types (count=0).
    - Include subheadings "Dominant Types" (most common) and "Less Represented Types" (absent/scarce). Explain how each affects communication, decision-making, or team perspective.
    - End with a short "Summary" subheading (2–3 sentences).
@@ -111,7 +111,7 @@ Write **Section 1: Introduction & Team Dynamics**.
 
 - Briefly introduce the Enneagram system (Type One … Type Nine).
 - Provide a breakdown of each type (1–9) with count and percentage (even if count=0).
-- `### Types on the Team`: List types present with short bullet points, count, and %.
+- `### Types on the Team`: List types present with short bullet points, count, and %, **and mention the user names** who hold that type.
 - `### Types Not on the Team`: List absent types with the same format (count=0, 0%).
 - `### Dominant Types`: Most common types, how they shape communication/decisions.
 - `### Less Represented Types`: Discuss missing or rare types, the impact on the team.
@@ -180,20 +180,20 @@ Required length: ~400 words.
 }
 
 # ---------------------------------------------------------------------
-# The Streamlit App
+# Streamlit App
 # ---------------------------------------------------------------------
-st.title('Enneagram Team Report Generator (CSV-based)')
+st.title('Enneagram Team Report Generator (CSV-based, with Names)')
 
-# -- Cover Page Details
+# Cover Page
 st.subheader("Cover Page Details")
-logo_path = "truity_logo.png"  # For your cover page
+logo_path = "truity_logo.png"
 company_name = st.text_input("Company Name (for cover page)", "Example Corp")
 team_name = st.text_input("Team Name (for cover page)", "Marketing Team")
 today_str = datetime.date.today().strftime("%B %d, %Y")
 custom_date = st.text_input("Date (for cover page)", today_str)
 
-# CSV upload
-st.subheader("Upload CSV with columns: User Name, EG Type")
+# CSV Upload
+st.subheader("Upload CSV with columns: 'User Name' and 'EG Type'")
 uploaded_csv = st.file_uploader("Upload CSV", type=["csv"])
 
 if st.button("Generate Report from CSV"):
@@ -202,42 +202,41 @@ if st.button("Generate Report from CSV"):
     else:
         with st.spinner("Processing CSV..."):
             df = pd.read_csv(uploaded_csv)
-            # We only care about 'User Name' and 'EG Type'
-            # We'll skip rows missing or blank 'EG Type'
+
+            # Parse out Name + Enneagram Type
             valid_rows = []
             for i, row in df.iterrows():
-                name_val = row.get("User Name", "")
+                nm_val = row.get("User Name", "")
                 eg_val = row.get("EG Type", "")
-                # Convert them to strings, strip
-                name_str = str(name_val).strip()
+                nm_str = str(nm_val).strip()
                 eg_str = str(eg_val).strip()
-                # parse Enneagram type
-                parsed = parse_eg_type(eg_str)
-                if name_str and parsed:
-                    valid_rows.append((name_str, parsed))
-            
+                parsed_type = parse_eg_type(eg_str)
+                if nm_str and parsed_type:
+                    valid_rows.append((nm_str, parsed_type))
+
             if not valid_rows:
-                st.error("No valid Enneagram types found in CSV. Nothing to report.")
+                st.error("No valid Enneagram types found in CSV.")
             else:
-                # Team size, members list
+                # Prepare the data for the LLM
                 team_size = len(valid_rows)
                 team_members_list = ""
-                for i, (nm, t) in enumerate(valid_rows):
-                    team_members_list += f"{i+1}. {nm}: {t}\n"
+                for i, (name, egtype) in enumerate(valid_rows):
+                    team_members_list += f"{i+1}. {name}: {egtype}\n"
 
                 # Count distribution
                 from collections import Counter
-                type_counts = Counter([r[1] for r in valid_rows])
-                total_members = len(valid_rows)
+                type_counts = Counter([p[1] for p in valid_rows])
+                total_members = team_size
                 type_percentages = {
-                    k: round((v / total_members) * 100)
-                    for k, v in type_counts.items()
+                    t: round((c / total_members) * 100)
+                    for t, c in type_counts.items()
                 }
 
-                # Create bar chart
+                # Make bar chart
                 sns.set_style('whitegrid')
                 plt.rcParams.update({'font.family': 'serif'})
                 plt.figure(figsize=(10, 6))
+
                 sorted_types = sorted(type_counts.keys())
                 sorted_counts = [type_counts[t] for t in sorted_types]
                 sns.barplot(
@@ -256,28 +255,25 @@ if st.button("Generate Report from CSV"):
                 type_distribution_plot = buf.getvalue()
                 plt.close()
 
-                # Prepare LLM
-                from langchain_community.chat_models import ChatOpenAI
+                # LLM
                 chat_model = ChatOpenAI(
                     openai_api_key=st.secrets['API_KEY'],
                     model_name='gpt-4o-2024-08-06',
                     temperature=0.2
                 )
 
-                # Format initial context
-                from langchain.prompts import PromptTemplate
+                # Build initial context
                 initial_context_template = PromptTemplate.from_template(initial_context)
                 formatted_initial_context = initial_context_template.format(
                     TEAM_SIZE=str(team_size),
                     TEAM_MEMBERS_LIST=team_members_list
                 )
 
-                # Generate sections
+                # Generate the 3 sections
                 section_order = ["Intro_Dynamics", "Team Insights", "NextSteps"]
                 report_sections = {}
                 report_so_far = ""
 
-                from langchain.chains import LLMChain
                 for section_name in section_order:
                     prompt_template = PromptTemplate.from_template(prompts[section_name])
                     prompt_vars = {
@@ -287,20 +283,18 @@ if st.button("Generate Report from CSV"):
                     chain = LLMChain(prompt=prompt_template, llm=chat_model)
                     section_text = chain.run(**prompt_vars)
                     report_sections[section_name] = section_text.strip()
-                    report_so_far += f"\n\n{section_text.strip()}"
+                    report_so_far += "\n\n" + section_text.strip()
 
-                # Display in Streamlit
-                for s in section_order:
-                    st.markdown(report_sections[s])
-                    if s == "Intro_Dynamics":
+                # Display
+                for sec in section_order:
+                    st.markdown(report_sections[sec])
+                    if sec == "Intro_Dynamics":
                         st.header("Enneagram Type Distribution Plot")
                         st.image(type_distribution_plot, use_column_width=True)
 
-                # -----------------------------
-                # Cover Page + PDF Generation
-                # -----------------------------
+                # PDF w/ Cover
                 def build_cover_page(logo_path, company_name, team_name, date_str):
-                    cover_elems = []
+                    elements = []
                     styles = getSampleStyleSheet()
 
                     cover_title_style = ParagraphStyle(
@@ -321,51 +315,44 @@ if st.button("Generate Report from CSV"):
                         spaceAfter=8
                     )
 
-                    # Some vertical space
-                    cover_elems.append(Spacer(1, 80))
+                    elements.append(Spacer(1, 80))
 
                     try:
                         logo = ReportLabImage(logo_path, width=140, height=52)
-                        cover_elems.append(logo)
+                        elements.append(logo)
                     except:
                         pass
 
-                    cover_elems.append(Spacer(1, 50))
+                    elements.append(Spacer(1, 50))
 
-                    # Title
                     title_para = Paragraph("Enneagram For The Workplace<br/>Team Report", cover_title_style)
-                    cover_elems.append(title_para)
+                    elements.append(title_para)
 
-                    cover_elems.append(Spacer(1, 50))
+                    elements.append(Spacer(1, 50))
 
-                    # Horizontal line
                     sep = HRFlowable(width="70%", color=colors.darkgoldenrod)
-                    cover_elems.append(sep)
-                    cover_elems.append(Spacer(1, 20))
+                    elements.append(sep)
+                    elements.append(Spacer(1, 20))
 
-                    # Company, Team, Date
                     comp_para = Paragraph(company_name, cover_text_style)
-                    cover_elems.append(comp_para)
+                    elements.append(comp_para)
                     tm_para = Paragraph(team_name, cover_text_style)
-                    cover_elems.append(tm_para)
+                    elements.append(tm_para)
                     dt_para = Paragraph(date_str, cover_text_style)
-                    cover_elems.append(dt_para)
+                    elements.append(dt_para)
 
-                    cover_elems.append(Spacer(1, 60))
-                    cover_elems.append(PageBreak())
-                    return cover_elems
+                    elements.append(Spacer(1, 60))
+                    elements.append(PageBreak())
+                    return elements
 
-                def convert_markdown_to_pdf_with_cover(report_dict, distribution_plot,
-                                                       logo_path, company_name, team_name, date_str):
+                def convert_to_pdf_with_cover(report_dict, dist_plot, logo_path, company_name, team_name, date_str):
                     pdf_buffer = io.BytesIO()
                     doc = SimpleDocTemplate(pdf_buffer, pagesize=letter)
                     elements = []
 
-                    # Cover page
-                    cover_elems = build_cover_page(logo_path, company_name, team_name, date_str)
-                    elements.extend(cover_elems)
+                    cover = build_cover_page(logo_path, company_name, team_name, date_str)
+                    elements.extend(cover)
 
-                    # Normal styling
                     styles = getSampleStyleSheet()
                     styleH1 = ParagraphStyle(
                         'Heading1Custom',
@@ -476,12 +463,11 @@ if st.button("Generate Report from CSV"):
                                 elements.append(Paragraph(elem.get_text(strip=True), styleN))
                                 elements.append(Spacer(1, 12))
 
-                    # Process each section
                     for s in section_order:
                         process_md(report_dict[s])
                         if s == "Intro_Dynamics":
                             elements.append(Spacer(1, 12))
-                            img_buf = io.BytesIO(distribution_plot)
+                            img_buf = io.BytesIO(dist_plot)
                             img = ReportLabImage(img_buf, width=400, height=240)
                             elements.append(img)
                             elements.append(Spacer(1, 12))
@@ -490,7 +476,7 @@ if st.button("Generate Report from CSV"):
                     pdf_buffer.seek(0)
                     return pdf_buffer
 
-                pdf_data = convert_markdown_to_pdf_with_cover(
+                pdf_data = convert_to_pdf_with_cover(
                     report_sections,
                     type_distribution_plot,
                     logo_path,
