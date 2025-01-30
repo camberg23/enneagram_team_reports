@@ -182,18 +182,18 @@ Required length: ~400 words.
 # ---------------------------------------------------------------------
 # Streamlit App
 # ---------------------------------------------------------------------
-st.title('Enneagram Team Report Generator (CSV-based, with Names)')
+st.title('Enneagram Team Report Generator')
 
 # Cover Page
 st.subheader("Cover Page Details")
 logo_path = "truity_logo.png"
-company_name = st.text_input("Company Name (for cover page)", "Example Corp")
-team_name = st.text_input("Team Name (for cover page)", "Marketing Team")
+company_name = st.text_input("Company Name (for cover page)", "")
+team_name = st.text_input("Team Name (for cover page)", "")
 today_str = datetime.date.today().strftime("%B %d, %Y")
 custom_date = st.text_input("Date (for cover page)", today_str)
 
 # CSV Upload
-st.subheader("Upload CSV with columns: 'User Name' and 'EG Type'")
+st.subheader("Upload CSV")
 uploaded_csv = st.file_uploader("Upload CSV", type=["csv"])
 
 if st.button("Generate Report from CSV"):
