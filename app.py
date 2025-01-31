@@ -53,7 +53,7 @@ def parse_eg_type(raw: str) -> str:
     return eg_map.get(lower, "")
 
 # ---------------------------------------------------------------------
-# Prompts (Slightly Updated to Mention Names in "Types on the Team")
+# Prompts (Slightly Updated to Mention Names + a distribution table placeholder)
 # ---------------------------------------------------------------------
 initial_context = """
 You are an expert organizational psychologist specializing in team dynamics using the Enneagram framework.
@@ -102,6 +102,9 @@ Maintain a professional, neutral tone.
 prompts = {
     "Intro_Dynamics": """
 {INITIAL_CONTEXT}
+
+**Actual Type Counts & Percentages**:
+{DISTRIBUTION_TABLE}
 
 **Your Role:**
 
@@ -180,7 +183,7 @@ Required length: ~400 words.
 }
 
 # ---------------------------------------------------------------------
-# Streamlit App
+# The Streamlit App
 # ---------------------------------------------------------------------
 st.title('Enneagram Team Report Generator')
 
@@ -219,6 +222,8 @@ if st.button("Generate Report from CSV"):
             else:
                 # Prepare the data for the LLM
                 team_size = len(valid_rows)
+
+                # We'll store each user in a line plus also track counts
                 team_members_list = ""
                 for i, (name, egtype) in enumerate(valid_rows):
                     team_members_list += f"{i+1}. {name}: {egtype}\n"
@@ -232,7 +237,7 @@ if st.button("Generate Report from CSV"):
                     for t, c in type_counts.items()
                 }
 
-                # Make bar chart
+                # Build a bar chart
                 sns.set_style('whitegrid')
                 plt.rcParams.update({'font.family': 'serif'})
                 plt.figure(figsize=(10, 6))
@@ -255,46 +260,69 @@ if st.button("Generate Report from CSV"):
                 type_distribution_plot = buf.getvalue()
                 plt.close()
 
-                # LLM
+                # Build a distribution table for all 9 types
+                all_eneatypes = [
+                    "Type One", "Type Two", "Type Three", "Type Four",
+                    "Type Five", "Type Six", "Type Seven", "Type Eight", "Type Nine"
+                ]
+                distribution_table_md = "Type | Count | Percentage\n---|---|---\n"
+                for etype in all_eneatypes:
+                    c = type_counts.get(etype, 0)
+                    p = type_percentages.get(etype, 0)
+                    distribution_table_md += f"{etype} | {c} | {p}%\n"
+
+                # Prepare LLM
                 chat_model = ChatOpenAI(
                     openai_api_key=st.secrets['API_KEY'],
                     model_name='gpt-4o-2024-08-06',
                     temperature=0.2
                 )
 
-                # Build initial context
+                # Format initial context
+                from langchain.prompts import PromptTemplate
                 initial_context_template = PromptTemplate.from_template(initial_context)
                 formatted_initial_context = initial_context_template.format(
                     TEAM_SIZE=str(team_size),
                     TEAM_MEMBERS_LIST=team_members_list
                 )
 
-                # Generate the 3 sections
+                # Generate sections in order
                 section_order = ["Intro_Dynamics", "Team Insights", "NextSteps"]
                 report_sections = {}
                 report_so_far = ""
 
+                from langchain.chains import LLMChain
                 for section_name in section_order:
                     prompt_template = PromptTemplate.from_template(prompts[section_name])
-                    prompt_vars = {
-                        "INITIAL_CONTEXT": formatted_initial_context.strip(),
-                        "REPORT_SO_FAR": report_so_far.strip()
-                    }
+
+                    if section_name == "Intro_Dynamics":
+                        # pass the distribution_table to the LLM
+                        prompt_vars = {
+                            "INITIAL_CONTEXT": formatted_initial_context.strip(),
+                            "REPORT_SO_FAR": report_so_far.strip(),
+                            "DISTRIBUTION_TABLE": distribution_table_md
+                        }
+                    else:
+                        prompt_vars = {
+                            "INITIAL_CONTEXT": formatted_initial_context.strip(),
+                            "REPORT_SO_FAR": report_so_far.strip()
+                        }
+
                     chain = LLMChain(prompt=prompt_template, llm=chat_model)
                     section_text = chain.run(**prompt_vars)
                     report_sections[section_name] = section_text.strip()
                     report_so_far += "\n\n" + section_text.strip()
 
-                # Display
+                # Display on Streamlit
                 for sec in section_order:
                     st.markdown(report_sections[sec])
                     if sec == "Intro_Dynamics":
                         st.header("Enneagram Type Distribution Plot")
                         st.image(type_distribution_plot, use_column_width=True)
 
-                # PDF w/ Cover
+                # Now build PDF with cover
                 def build_cover_page(logo_path, company_name, team_name, date_str):
-                    elements = []
+                    cover_elems = []
                     styles = getSampleStyleSheet()
 
                     cover_title_style = ParagraphStyle(
@@ -315,43 +343,43 @@ if st.button("Generate Report from CSV"):
                         spaceAfter=8
                     )
 
-                    elements.append(Spacer(1, 80))
+                    cover_elems.append(Spacer(1, 80))
 
                     try:
                         logo = ReportLabImage(logo_path, width=140, height=52)
-                        elements.append(logo)
+                        cover_elems.append(logo)
                     except:
                         pass
 
-                    elements.append(Spacer(1, 50))
+                    cover_elems.append(Spacer(1, 50))
 
                     title_para = Paragraph("Enneagram For The Workplace<br/>Team Report", cover_title_style)
-                    elements.append(title_para)
+                    cover_elems.append(title_para)
 
-                    elements.append(Spacer(1, 50))
+                    cover_elems.append(Spacer(1, 50))
 
                     sep = HRFlowable(width="70%", color=colors.darkgoldenrod)
-                    elements.append(sep)
-                    elements.append(Spacer(1, 20))
+                    cover_elems.append(sep)
+                    cover_elems.append(Spacer(1, 20))
 
                     comp_para = Paragraph(company_name, cover_text_style)
-                    elements.append(comp_para)
+                    cover_elems.append(comp_para)
                     tm_para = Paragraph(team_name, cover_text_style)
-                    elements.append(tm_para)
+                    cover_elems.append(tm_para)
                     dt_para = Paragraph(date_str, cover_text_style)
-                    elements.append(dt_para)
+                    cover_elems.append(dt_para)
 
-                    elements.append(Spacer(1, 60))
-                    elements.append(PageBreak())
-                    return elements
+                    cover_elems.append(Spacer(1, 60))
+                    cover_elems.append(PageBreak())
+                    return cover_elems
 
                 def convert_to_pdf_with_cover(report_dict, dist_plot, logo_path, company_name, team_name, date_str):
                     pdf_buffer = io.BytesIO()
                     doc = SimpleDocTemplate(pdf_buffer, pagesize=letter)
                     elements = []
 
-                    cover = build_cover_page(logo_path, company_name, team_name, date_str)
-                    elements.extend(cover)
+                    cover_elems = build_cover_page(logo_path, company_name, team_name, date_str)
+                    elements.extend(cover_elems)
 
                     styles = getSampleStyleSheet()
                     styleH1 = ParagraphStyle(
