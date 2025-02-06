@@ -93,8 +93,8 @@ def _generate_pie_chart(data, slices, scaling_factor=1.6):
     # Add labels positioned relative to each wedge
     for s in filtered_slices:
         theta_mid = (s['theta1'] + s['theta2']) / 2
-        x = 1.2 * s['radius'] * np.cos(np.radians(theta_mid))
-        y = 1.2 * s['radius'] * np.sin(np.radians(theta_mid))
+        x = 1.35 * s['radius'] * np.cos(np.radians(theta_mid))
+        y = 1.35 * s['radius'] * np.sin(np.radians(theta_mid))
         ax.text(x, y, s['label'], ha='center', va='center', fontsize=12, color=s['color'], fontweight='bold')
 
     # Adjust limits and aspect to ensure the entire chart is visible
